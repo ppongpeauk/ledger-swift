@@ -11,8 +11,12 @@ struct TransactionButton: View {
 			VStack(alignment: .leading) {
 				Text(transaction.name)
 					.font(.headline)
-				Text("$\(transaction.splits.reduce(0) { $0 + $1.price }, specifier: "%.2f")")
-					.font(.subheadline)
+				HStack(spacing: 4) {
+					Text("$\(transaction.splits.reduce(0) { $0 + $1.price }, specifier: "%.2f")")
+					Text("•")
+					Text("^[\(transaction.splits.count) splits](inflect: true)")
+				}
+					.foregroundStyle(.secondary)
 			}
 		}
 	}

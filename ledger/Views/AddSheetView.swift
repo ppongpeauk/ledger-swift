@@ -3,19 +3,20 @@ import UserNotifications
 
 struct AddSheetView: View {
 	@Binding var addSheetShown: Bool
-	@ObservedObject var dataManager: DataManager
+	@StateObject var dataManager: DataManager
 
 	@State private var name: String = ""
-	@State private var splits: [Split] = [Split(recipientId: UUID(), price: 0)]
+	@State private var splits: [Split] = [Split(recipientId: .empty, price: 0)]
 	@State private var tax: String = "0"
 	@State private var tip: String = "0"
 	@State private var notificationEnabled = false
 	@State private var notificationDate = Date()
+	@State private var note: String = ""
 
 	private var isValid: Bool {
 		!name.isEmpty &&
 			!splits.isEmpty &&
-			splits.allSatisfy { $0.price > 0 } &&
+			splits.allSatisfy { $0.price > 0 && $0.recipientId != .empty } &&
 			(Double(tax) ?? 0) >= 0 &&
 			(Double(tip) ?? 0) >= 0
 	}
@@ -48,6 +49,16 @@ struct AddSheetView: View {
 	private var transactionDetailsSection: some View {
 		Section(header: Text("Transaction Details")) {
 			TextField("Name", text: $name)
+			ZStack(alignment: .topLeading) {
+				if note.isEmpty {
+					Text("Add a note...")
+						.foregroundColor(Color(.placeholderText))
+						.padding(.horizontal, 4)
+						.padding(.vertical, 8)
+				}
+				TextEditor(text: $note)
+					.frame(minHeight: 100)
+			}
 		}
 	}
 
@@ -55,8 +66,21 @@ struct AddSheetView: View {
 		Section(header: Text("Splits")) {
 			ForEach($splits) { $split in
 				HStack {
+					Picker("", selection: $split.recipientId) {
+						Text("Unassigned").tag(UUID.empty)
+						ForEach(dataManager.recipients) { recipient in
+							Text(recipient.name).tag(recipient.id)
+						}
+					}
+					.labelsHidden()
+					.id(dataManager.recipients.count)
+
+					Spacer()
+
 					TextField("Amount", value: $split.price, format: .currency(code: "USD"))
 						.keyboardType(.decimalPad)
+						.multilineTextAlignment(.trailing)
+						.frame(width: 120)
 
 					if splits.count > 1 {
 						Button(role: .destructive) {
@@ -66,14 +90,17 @@ struct AddSheetView: View {
 						} label: {
 							Image(systemName: "trash")
 						}
+						.buttonStyle(.borderless)
 					}
 				}
 			}
 
-			Button("Add Split") {
+			Button(action: {
 				withAnimation {
-					splits.append(Split(recipientId: UUID(), price: 0))
+					splits.append(Split(recipientId: .empty, price: 0))
 				}
+			}) {
+				Label("New Split", systemImage: "plus")
 			}
 		}
 	}
@@ -118,6 +145,7 @@ struct AddSheetView: View {
 		let transaction = Transaction(
 			id: UUID(),
 			name: name,
+			note: note,
 			notification: notificationEnabled ? TransactionNotification(
 				name: "Payment Reminder for \(name)",
 				time: notificationDate

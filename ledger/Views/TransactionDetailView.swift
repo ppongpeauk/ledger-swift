@@ -17,6 +17,7 @@ struct TransactionDetailView: View {
 	@State private var editedTip = ""
 	@State private var notificationEnabled = false
 	@State private var notificationDate = Date()
+	@State private var editedNote = ""
 	
 	var body: some View {
 		List {
@@ -29,7 +30,7 @@ struct TransactionDetailView: View {
 				deleteSection
 			}
 		}
-		.navigationTitle("Transaction Details")
+		.navigationTitle(transaction.name)
 		.toolbar {
 			ToolbarItem(placement: .navigationBarTrailing) {
 				Button(isEditing ? "Save" : "Edit") {
@@ -38,6 +39,7 @@ struct TransactionDetailView: View {
 					}
 					isEditing.toggle()
 				}
+				.disabled(isEditing && !canSave)
 			}
 		}
 		.onAppear {
@@ -51,7 +53,7 @@ struct TransactionDetailView: View {
 				deleteTransaction()
 			}
 		} message: {
-			Text("Are you sure you want to delete this transaction?")
+			Text("Are you sure you want to delete '\(transaction.name)'? This action cannot be undone.")
 		}
 	}
 	
@@ -61,8 +63,23 @@ struct TransactionDetailView: View {
 		Section {
 			if isEditing {
 				TextField("Name", text: $editedName)
+				ZStack(alignment: .topLeading) {
+					if editedNote.isEmpty {
+						Text("Add a note...")
+							.foregroundColor(Color(.placeholderText))
+							.padding(.vertical, 8)
+					}
+					TextEditor(text: $editedNote)
+						.frame(minHeight: 100)
+				}
 			} else {
 				LabeledContent("Name", value: transaction.name)
+				if !transaction.note.isEmpty {
+					LabeledContent("Note") {
+						Text(transaction.note)
+							.fixedSize(horizontal: false, vertical: true)
+					}
+				}
 				LabeledContent("Total Amount", value: String(format: "$%.2f", totalAmount))
 			}
 		} header: {
@@ -72,14 +89,21 @@ struct TransactionDetailView: View {
 	
 	private var splitsSection: some View {
 		Section {
-			ForEach(editedSplits.indices, id: \.self) { index in
-				splitRow(at: index)
-			}
-			
-			if isEditing {
-				Button("Add Split") {
-					withAnimation {
-						editedSplits.append(Split(recipientId: UUID(), price: 0))
+			if editedSplits.isEmpty && !isEditing {
+				Text("No splits")
+					.foregroundStyle(.secondary)
+			} else {
+				ForEach(editedSplits.indices, id: \.self) { index in
+					splitRow(at: index)
+				}
+				
+				if isEditing {
+					Button(action: {
+						withAnimation {
+							editedSplits.append(Split(recipientId: .empty, price: 0))
+						}
+					}) {
+						Label("New Split", systemImage: "plus")
 					}
 				}
 			}
@@ -91,13 +115,31 @@ struct TransactionDetailView: View {
 	private var additionalChargesSection: some View {
 		Section {
 			if isEditing {
-				TextField("Tax", text: $editedTax)
-					.keyboardType(.decimalPad)
-				TextField("Tip", text: $editedTip)
-					.keyboardType(.decimalPad)
+				HStack {
+					Text("Tax")
+					Spacer()
+					TextField("Tax", text: $editedTax)
+						.keyboardType(.decimalPad)
+						.multilineTextAlignment(.trailing)
+				}
+				HStack {
+					Text("Tip")
+					Spacer()
+					TextField("Tip", text: $editedTip)
+						.keyboardType(.decimalPad)
+						.multilineTextAlignment(.trailing)
+				}
 			} else {
-				LabeledContent("Tax", value: String(format: "$%.2f", transaction.extraPrices.tax))
-				LabeledContent("Tip", value: String(format: "$%.2f", transaction.extraPrices.tip))
+				LabeledContent {
+					Text(String(format: "$%.2f", transaction.extraPrices.tax))
+				} label: {
+					Text("Tax")
+				}
+				LabeledContent {
+					Text(String(format: "$%.2f", transaction.extraPrices.tip))
+				} label: {
+					Text("Tip")
+				}
 			}
 		} header: {
 			Text("Additional Charges")
@@ -121,8 +163,13 @@ struct TransactionDetailView: View {
 	
 	private var deleteSection: some View {
 		Section {
-			Button("Delete Transaction", role: .destructive) {
-				showingDeleteAlert = true
+			Button(role: .destructive, action: { showingDeleteAlert = true }) {
+				Label {
+					Text("Delete Transaction")
+				} icon: {
+					Image(systemName: "trash")
+						.foregroundStyle(.red)
+				}
 			}
 		}
 	}
@@ -132,24 +179,39 @@ struct TransactionDetailView: View {
 	private func splitRow(at index: Int) -> some View {
 		HStack {
 			if isEditing {
-				TextField("Amount", text: Binding(
-					get: { String(format: "%.2f", editedSplits[index].price) },
-					set: { if let value = Double($0) { editedSplits[index].price = value } }
-				))
-				.keyboardType(.decimalPad)
-					
+				Picker("", selection: $editedSplits[index].recipientId) {
+					Text("Unassigned").tag(UUID.empty)
+					ForEach(dataManager.recipients) { recipient in
+						Text(recipient.name).tag(recipient.id)
+					}
+				}
+				.labelsHidden()
+				.id(dataManager.recipients.count)
+
+				Spacer()
+
+				TextField("Amount", value: $editedSplits[index].price, format: .currency(code: "USD"))
+					.keyboardType(.decimalPad)
+					.multilineTextAlignment(.trailing)
+					.frame(width: 120)
+
 				if editedSplits.count > 1 {
 					Button(role: .destructive) {
 						withAnimation {
-							let splitToRemove = editedSplits[index]
-							editedSplits.removeAll { $0.id == splitToRemove.id }
+							editedSplits.removeAll { $0.id == editedSplits[index].id }
 						}
 					} label: {
 						Image(systemName: "trash")
 					}
+					.buttonStyle(.borderless)
 				}
 			} else {
-				Text("Amount")
+				if let recipient = dataManager.recipients.first(where: { $0.id == transaction.splits[index].recipientId }) {
+					Text(recipient.name)
+				} else {
+					Text("Unassigned")
+						.foregroundStyle(.secondary)
+				}
 				Spacer()
 				Text(String(format: "$%.2f", transaction.splits[index].price))
 			}
@@ -163,10 +225,15 @@ struct TransactionDetailView: View {
 		return splitTotal + (Double(editedTax) ?? 0) + (Double(editedTip) ?? 0)
 	}
 	
+	private var canSave: Bool {
+		!editedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+	}
+	
 	// MARK: - Methods
 	
 	private func loadTransactionData() {
 		editedName = transaction.name
+		editedNote = transaction.note
 		editedSplits = transaction.splits
 		editedTax = String(format: "%.2f", transaction.extraPrices.tax)
 		editedTip = String(format: "%.2f", transaction.extraPrices.tip)
@@ -180,6 +247,7 @@ struct TransactionDetailView: View {
 		if let index = dataManager.transactions.firstIndex(where: { $0.id == transaction.id }) {
 			var updatedTransaction = transaction
 			updatedTransaction.name = editedName
+			updatedTransaction.note = editedNote
 			updatedTransaction.splits = editedSplits
 			updatedTransaction.extraPrices = ExtraPrices(
 				tax: Double(editedTax) ?? 0,
@@ -243,6 +311,7 @@ struct TransactionDetailView: View {
 			transaction: Transaction(
 				id: UUID(),
 				name: "Test Transaction",
+				note: "",
 				notification: TransactionNotification(
 					name: "Payment Due",
 					time: Date()
